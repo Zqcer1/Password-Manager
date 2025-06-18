@@ -2,6 +2,7 @@ from getpass import getpass
 from argon2 import PasswordHasher, exceptions
 from cryptography.fernet import Fernet
 import json
+import os
 
 def main():
     passwordManager = PasswordManager()
@@ -21,18 +22,62 @@ class PasswordManager():
     def loadUserPasswordCombo(self):
         with open("vault.json",'r') as file:
             userPasswordComboEncrypted = json.load(file)
-        userPasswordComboDecrypted = []
+        userPasswordComboDecrypted = {}
         for i in userPasswordComboEncrypted:
             salt = i["salt"].encode("utf-8")
-            token = i["password"].encode("utf-8")
+            token = i["token"].encode("utf-8")
             password = self.decrypt(token, self.deriveKey(self.getMasterPassword,salt))
             userPasswordComboEncrypted.append({
-                "website":i["website"],
-                "salt":i["salt"],
-                "username":i["username"],
-                "password":password
+                i.key():{
+                    "salt":i["salt"],
+                    "username":i["username"],
+                    "password":password
+                }
             })
         return (userPasswordComboDecrypted,userPasswordComboEncrypted)
+    
+    def addUserPasswordCombo(self, website: str, username: str, password: str) -> None:
+        salt = os.urandom(16)
+        if website not in self.getUserPasswordCombo.keys():
+            newEntry = {
+                website: [{
+                    "salt":str(salt),
+                    "username":username,
+                    "password":password
+                }]
+            }
+            key = self.deriveKey(password,salt)
+            token = self.encrypt(password,key)
+            newEntryEncrypted = {
+                website: [{
+                    "salt":str(os.urandom(16)),
+                    "username":username,
+                    "token":token
+                }]
+            }
+        else:
+            newEntry = self.getUserPasswordCombo()[website].append({
+                "salt":str(salt),
+                "username":username,
+                "password":password
+            })
+            key = self.deriveKey(password,salt)
+            token = self.encrypt(password,key)
+            newEntryEncrypted = self.getUserPasswordComboEncrypted()[website].append({
+                website: {
+                    "salt":str(os.urandom(16)),
+                    "username":username,
+                    "token":token
+                }
+                })
+        vault = self.getUserPasswordCombo()
+        encryptedVault = self.getUserPasswordComboEncrypted()
+        vault.update(newEntry)
+        encryptedVault.update(newEntryEncrypted)
+        self.setUserPasswordComboEncrypted(encryptedVault)
+        self.setUserPasswordCombo(vault)
+        with open("vault.json","w") as file:
+            file.write(file,str(self.getUserPasswordComboEncrypted()))
 
     def getMasterPassword(self):
         return self.__masterPassword
@@ -42,6 +87,12 @@ class PasswordManager():
     
     def getUserPasswordCombo(self):
         return self.__userPasswordCombo
+    
+    def setUserPasswordComboEncrypted(self, new):
+        self.__userPasswordComboEncrypted = new
+
+    def setUserPasswordCombo(self, new):
+        self.__userPasswordCombo = new
     
     def deriveKey(self,plaintext: str, salt: bytes):
         passwordHasher = PasswordHasher()
